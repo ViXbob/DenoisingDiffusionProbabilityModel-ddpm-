@@ -94,7 +94,7 @@ def train(modelConfig: Dict):
         
         if total_epoch % (10000 // len) == 0:
             torch.save(net_model.state_dict(), os.path.join(
-                modelConfig["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len)) + "_.pt"))
+                modelConfig["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
 
 
 def eval(modelConfig: Dict):
