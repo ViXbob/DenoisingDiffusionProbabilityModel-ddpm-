@@ -45,6 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--state', type = str, help = 'train or eval', required=True, choices=["train", "eval"])
     parser.add_argument('--device', type = str, help = 'The device to use', required=False)
     parser.add_argument('--save_weight_dir', type = str, help = 'The directory to save checkpoints', required=True)
+    parser.add_argument('--batch_size', type = str, help = 'Batch size', required=False)
     
     # Training arguments
     parser.add_argument('--start_index', type = int, help = 'The start index you store your checkpoints', required=False)
@@ -71,6 +72,9 @@ if __name__ == '__main__':
     
     if args.device != None:
         model_config['device'] = args.device
+
+    if args.batch_size != None:
+        model_config['batch_size'] = args.batch_size
 
     model_config['state'] = args.state
     
