@@ -14,7 +14,7 @@ from Diffusion import GaussianDiffusionSampler, GaussianDiffusionTrainer
 from Diffusion.Model import UNet
 from Scheduler import GradualWarmupScheduler
 
-from torch_ema import ExponentialMovingAverage
+from ema import ExponentialMovingAverage
 
 def train(modelConfig: Dict):
     device = torch.device(modelConfig["device"])
