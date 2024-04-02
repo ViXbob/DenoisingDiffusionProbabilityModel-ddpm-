@@ -57,7 +57,9 @@ def train(modelConfig: Dict):
     print(f"enable_ema: {enable_ema}, ema_update_gap: {ema_update_gap}")
     
     # start training
+    total_epoch = start_index
     for e in range(modelConfig["epoch"]):
+        total_epoch += 1
         before_avg_loss = 0
         len = 0
         with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
@@ -89,6 +91,10 @@ def train(modelConfig: Dict):
         warmUpScheduler.step()
         torch.save(net_model.state_dict(), os.path.join(
             modelConfig["save_weight_dir"], 'ckpt_' + str(start_index + e) + "_.pt"))
+        
+        if total_epoch % (10000 // len) == 0:
+            torch.save(net_model.state_dict(), os.path.join(
+                modelConfig["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len)) + "_.pt"))
 
 
 def eval(modelConfig: Dict):
