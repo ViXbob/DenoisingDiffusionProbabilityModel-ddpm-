@@ -131,3 +131,6 @@ dmypy.json
 CIFAR10/
 Checkpoints/
 Checkpoints*/
+SampledImgs*/
+
+*.png

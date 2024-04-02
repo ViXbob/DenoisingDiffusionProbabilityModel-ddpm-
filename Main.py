@@ -53,6 +53,7 @@ if __name__ == '__main__':
     parser.add_argument('--enable_ema', action = 'store_true', help = 'Whether enable EMA', required=False)
     parser.add_argument('--ema_update_gap', type = int, help = 'EMA update gap', required=False)
     parser.add_argument('--epoch', type = int, help = 'Total epoch to train', required=False)
+    parser.add_argument('--epoch_resume', type = int, help = 'The epoch to resume', required=False)
     # End
     
     # Eval arguments
@@ -123,6 +124,9 @@ if __name__ == '__main__':
             model_config['training_load_weight'] = None
 
         model_config['epoch'] = args.epoch
+        
+        if args.epoch_resume != None:
+            model_config['epoch_resume'] = args.epoch_resume
 
     print(json.dumps(model_config, indent=4))
     

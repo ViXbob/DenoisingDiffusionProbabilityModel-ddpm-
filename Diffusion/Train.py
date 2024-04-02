@@ -63,6 +63,11 @@ def train(modelConfig: Dict):
         total_epoch += 1
         before_avg_loss = 0
         len = 0
+        
+        if 'epoch_resume' in modelConfig and e < modelConfig['epoch_resume']:
+            warmUpScheduler.step()
+            continue
+                    
         with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
             for images, labels in tqdmDataLoader:
                 # train
@@ -89,7 +94,9 @@ def train(modelConfig: Dict):
                         ema.copy_to()
                 
         print(f"before: {before_avg_loss / len}")
+        
         warmUpScheduler.step()
+        
         torch.save(net_model.state_dict(), os.path.join(
             modelConfig["save_weight_dir"], 'ckpt_' + str(start_index + e) + "_.pt"))
         
