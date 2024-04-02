@@ -14,6 +14,7 @@ from Diffusion import GaussianDiffusionSampler, GaussianDiffusionTrainer
 from Diffusion.Model import UNet
 from Scheduler import GradualWarmupScheduler
 
+from torch_ema import ExponentialMovingAverage
 
 def train(modelConfig: Dict):
     device = torch.device(modelConfig["device"])
@@ -43,8 +44,22 @@ def train(modelConfig: Dict):
     trainer = GaussianDiffusionTrainer(
         net_model, modelConfig["beta_1"], modelConfig["beta_T"], modelConfig["T"]).to(device)
 
+    enable_ema =  modelConfig["enable_ema"]
+    if enable_ema:
+        ema_update_gap = modelConfig["ema_update_gap"]
+    else:
+        ema_update_gap = 1
+    
+    ema = ExponentialMovingAverage(net_model.parameters(), decay=0.9999)
+    
+    start_index = modelConfig["start_index"]
+    
+    print(f"enable_ema: {enable_ema}, ema_update_gap: {ema_update_gap}")
+    
     # start training
     for e in range(modelConfig["epoch"]):
+        before_avg_loss = 0
+        len = 0
         with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
             for images, labels in tqdmDataLoader:
                 # train
@@ -61,9 +76,19 @@ def train(modelConfig: Dict):
                     "img shape: ": x_0.shape,
                     "LR": optimizer.state_dict()['param_groups'][0]["lr"]
                 })
+                
+                before_avg_loss += loss.item()
+                len += 1
+                
+                if enable_ema == True:
+                    if ema.num_updates % ema_update_gap == 0:
+                        ema.update()
+                        ema.copy_to()
+                
+        print(f"before: {before_avg_loss / len}")
         warmUpScheduler.step()
         torch.save(net_model.state_dict(), os.path.join(
-            modelConfig["save_weight_dir"], 'ckpt_' + str(e) + "_.pt"))
+            modelConfig["save_weight_dir"], 'ckpt_' + str(start_index + e) + "_.pt"))
 
 
 def eval(modelConfig: Dict):
