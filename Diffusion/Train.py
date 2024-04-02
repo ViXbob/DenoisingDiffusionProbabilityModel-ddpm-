@@ -15,6 +15,7 @@ from Diffusion.Model import UNet
 from Scheduler import GradualWarmupScheduler
 
 from ema import ExponentialMovingAverage
+from pathlib import Path
 
 def train(modelConfig: Dict):
     device = torch.device(modelConfig["device"])
@@ -110,13 +111,15 @@ def eval(modelConfig: Dict):
         model.eval()
         sampler = GaussianDiffusionSampler(
             model, modelConfig["beta_1"], modelConfig["beta_T"], modelConfig["T"]).to(device)
-        # Sampled from standard normal distribution
-        noisyImage = torch.randn(
-            size=[modelConfig["batch_size"], 3, 32, 32], device=device)
-        saveNoisy = torch.clamp(noisyImage * 0.5 + 0.5, 0, 1)
-        save_image(saveNoisy, os.path.join(
-            modelConfig["sampled_dir"], modelConfig["sampledNoisyImgName"]), nrow=modelConfig["nrow"])
-        sampledImgs = sampler(noisyImage)
-        sampledImgs = sampledImgs * 0.5 + 0.5  # [0 ~ 1]
-        save_image(sampledImgs, os.path.join(
-            modelConfig["sampled_dir"],  modelConfig["sampledImgName"]), nrow=modelConfig["nrow"])
+        for i in range(modelConfig['sample_number_of_batch']):
+            # Sampled from standard normal distribution
+            noisyImage = torch.randn(
+                size=[modelConfig["batch_size"], 3, 32, 32], device=device)
+            if modelConfig['enable_progress_sampling'] == False:
+                sampledImgs = sampler(noisyImage, i)
+                sampledImgs = sampledImgs * 0.5 + 0.5  # [0 ~ 1]
+                for j in range(modelConfig['batch_size']):
+                    save_image(sampledImgs[j], os.path.join(
+                        modelConfig["sampled_dir"],  str(i * modelConfig["batch_size"] + j).zfill(6)) + ".png")
+            else:
+                sampler.progressive_sampling_and_save(noisyImage, [str(os.path.join(modelConfig["sampled_dir"],  str(i * modelConfig["batch_size"] + j).zfill(6))) for j in range(modelConfig['batch_size'])], i)

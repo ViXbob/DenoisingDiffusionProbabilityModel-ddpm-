@@ -4,7 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import numpy as np
-
+from tqdm import tqdm
+from torchvision.utils import save_image
+import os
+from typing import List
+from pathlib import Path
 
 def extract(v, t, x_shape):
     """
@@ -81,23 +85,57 @@ class GaussianDiffusionSampler(nn.Module):
 
         return xt_prev_mean, var
 
-    def forward(self, x_T):
+    def forward(self, x_T, batch_id):
         """
         Algorithm 2.
         """
         x_t = x_T
-        for time_step in reversed(range(self.T)):
-            print(time_step)
-            t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
-            mean, var= self.p_mean_variance(x_t=x_t, t=t)
-            # no noise when t == 0
-            if time_step > 0:
-                noise = torch.randn_like(x_t)
-            else:
-                noise = 0
-            x_t = mean + torch.sqrt(var) * noise
-            assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
+        with tqdm(range(self.T), desc="Sampling Processing") as progress:
+            progress.set_postfix(ordered_dict={
+                "batch": batch_id
+            })
+            for time_step_ in progress:
+                time_step = self.T - time_step_ - 1
+                t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
+                mean, var= self.p_mean_variance(x_t=x_t, t=t)
+                # no noise when t == 0
+                if time_step > 0:
+                    noise = torch.randn_like(x_t)
+                else:
+                    noise = 0
+                x_t = mean + torch.sqrt(var) * noise
+                assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
         x_0 = x_t
-        return torch.clip(x_0, -1, 1)   
+        return torch.clip(x_0, -1, 1)
+    
+    def progressive_sampling_and_save(self, x_T, paths: List[str], batch_id: int):
+        x_t = x_T
+        for index, path in enumerate(paths):
+            Path(path).mkdir(parents=True, exist_ok=True)
+            save_image(torch.clamp(x_t[index] * 0.5 + 0.5, 0, 1), os.path.join(path, "00.png"))
+        with tqdm(range(self.T), desc="Sampling Processing") as progress:
+            progress.set_postfix(ordered_dict={
+                "batch": batch_id
+            })
+            for time_step_ in progress:
+                time_step = self.T - time_step_ - 1
+                t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
+                mean, var= self.p_mean_variance(x_t=x_t, t=t)
+                # no noise when t == 0
+                if time_step > 0:
+                    noise = torch.randn_like(x_t)
+                else:
+                    noise = 0
+                x_t = mean + torch.sqrt(var) * noise
+                assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
+                
+                if time_step % 50 == 0:
+                    for index, path in enumerate(paths):
+                        save_image(torch.clamp(x_t[index] * 0.5 + 0.5, 0, 1), os.path.join(
+                            path,  str(20 - time_step // 50).zfill(2) + ".png"))
+                
+
+        x_0 = x_t
+        return torch.clamp(x_0, -1, 1)
 
 
