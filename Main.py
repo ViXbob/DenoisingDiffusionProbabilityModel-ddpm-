@@ -52,6 +52,7 @@ if __name__ == '__main__':
     parser.add_argument('--ema_update_gap', type = int, help = 'EMA update gap', required=False)
     parser.add_argument('--save_weight_dir', type = str, help = 'The directory to save checkpoints', required=True)
     parser.add_argument('--epoch', type = int, help = 'Total epoch to train', required=True)
+    parser.add_argument('--device', type = str, help = 'The device to use', required=False)
     args = parser.parse_args()
     # End
     print(args)
@@ -76,6 +77,9 @@ if __name__ == '__main__':
         model_config['training_load_weight'] = None
 
     model_config['epoch'] = args.epoch
+    
+    if args.device != None:
+        model_config['device'] = args.device
 
     print(json.dumps(model_config, indent=4))
     
