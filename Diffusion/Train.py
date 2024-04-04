@@ -235,7 +235,8 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
                 loss.backward()
                 
                 torch.nn.utils.clip_grad_norm_(
-                    net_model.parameters(), model_config["grad_clip"])
+                    ddp_model.parameters(), model_config["grad_clip"])
+                
                 optimizer.step()
                 
                 if local_rank == 0:
