@@ -14,7 +14,7 @@ from Diffusion import GaussianDiffusionSampler, GaussianDiffusionTrainer
 from Diffusion.Model import UNet
 from Scheduler import GradualWarmupScheduler
 
-from ema import ExponentialMovingAverage
+from ema import ModelEmaV2
 from pathlib import Path
 
 def train(modelConfig: Dict):
@@ -33,8 +33,9 @@ def train(modelConfig: Dict):
     # model setup
     net_model = UNet(T=modelConfig["T"], ch=modelConfig["channel"], ch_mult=modelConfig["channel_mult"], attn=modelConfig["attn"],
                      num_res_blocks=modelConfig["num_res_blocks"], dropout=modelConfig["dropout"]).to(device)
-    ema_update_gap = modelConfig["ema_update_gap"]
-    ema = ExponentialMovingAverage(net_model.parameters(), decay=0.9999)
+
+    ema = ModelEmaV2(net_model, decay=0.9999, device=device)
+    
     if modelConfig["training_load_weight"] is not None:
         net_model.load_state_dict(torch.load(os.path.join(
             modelConfig["save_weight_dir"], modelConfig["training_load_weight"]), map_location=device))
@@ -48,8 +49,11 @@ def train(modelConfig: Dict):
         optimizer=optimizer, T_max=modelConfig["epoch"], eta_min=0, last_epoch=-1)
     warmUpScheduler = GradualWarmupScheduler(
         optimizer=optimizer, multiplier=modelConfig["multiplier"], warm_epoch=modelConfig["epoch"] // 10, after_scheduler=cosineScheduler)
+    
     trainer = GaussianDiffusionTrainer(
         net_model, modelConfig["beta_1"], modelConfig["beta_T"], modelConfig["T"]).to(device)
+    ema_trainer = GaussianDiffusionTrainer(
+        ema.module, modelConfig["beta_1"], modelConfig["beta_T"], modelConfig["T"]).to(device)
     
     total_epoch = modelConfig["start_index"]
     
@@ -82,20 +86,17 @@ def train(modelConfig: Dict):
                 
                 non_ema_loss += loss.item()
                 len += 1
-                
-                if (ema.num_updates * (modelConfig['batch_size'] // 125)) % ema_update_gap == 0:
-                    ema.update()
+                ema.update(net_model)
             
             if total_epoch % 5 == 0:
                 torch.save(net_model.state_dict(), os.path.join(
                     modelConfig["save_weight_dir"], 'ckpt_' + str(total_epoch) + "_.pt"))
-                torch.save(ema.state_dict(), os.path.join(
+                torch.save(ema.module.state_dict(), os.path.join(
                     modelConfig["save_weight_dir"], 'ema_ckpt_' + str(total_epoch) + "_.pt"))
-            
             if total_epoch % 25 == 0:
                 torch.save(net_model.state_dict(), os.path.join(
                     modelConfig["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
-                torch.save(net_model.state_dict(), os.path.join(
+                torch.save(ema.module.state_dict(), os.path.join(
                     modelConfig["save_weight_dir"], 'ema_iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
                 
                 tqdmDataLoader.set_postfix(ordered_dict={})
@@ -108,10 +109,8 @@ def train(modelConfig: Dict):
                     loss = trainer(x_0).sum() / 1000.
                     non_ema_loss += loss.item()
                     
-                    with ema.average_parameters():
-                        loss = trainer(x_0).sum() / 1000.
-                        ema_loss += loss.item()
-                
+                    loss = ema_trainer(x_0).sum() / 1000.
+                    ema_loss += loss.item()
                 print(f"non-ema average loss: {non_ema_loss / len}, ema average loss: {ema_loss / len}")
             else:
                 print(f"average loss: {non_ema_loss / len}")
