@@ -175,18 +175,18 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ]))
     
-    train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(dataset, drop_last=True, shuffle=True)
     
     dataloader = DataLoader(
-        dataset, batch_size=model_config["batch_size"], shuffle=True, num_workers=4, drop_last=True, pin_memory=True, sampler=train_sampler)
+        dataset, batch_size=model_config["batch_size"], num_workers=4, pin_memory=False, sampler=train_sampler)
     
     net_model = UNet(T=model_config["T"], ch=model_config["channel"], ch_mult=model_config["channel_mult"], attn=model_config["attn"],
                      num_res_blocks=model_config["num_res_blocks"], dropout=model_config["dropout"]).to(device)
     
     if local_rank == 0:
         ema = ModelEmaV2(net_model, decay=0.9999, device=device)
-        ema_trainer = GaussianDiffusionTrainer(
-            ema.module, model_config["beta_1"], model_config["beta_T"], model_config["T"]).to(device)
+        # ema_trainer = GaussianDiffusionTrainer(
+        #     ema.module, model_config["beta_1"], model_config["beta_T"], model_config["T"]).to(device)
     
         if model_config["training_load_weight"] is not None:
             net_model.load_state_dict(torch.load(os.path.join(
@@ -218,40 +218,33 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
             continue
             
         train_sampler.set_epoch(e)
-        
-        with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
-            len = 0
+        iterator = tqdm(dataloader, dynamic_ncols=True) if local_rank == 0 else dataloader
+        len = 0
+        for images, labels in iterator:
+            # train
+            optimizer.zero_grad()
+            x_0 = images.to(device)
+            loss = trainer(x_0).sum() / 1000.
+            loss.backward()
             
-            iterator = tqdmDataLoader if local_rank == 0 else dataloader
+            torch.nn.utils.clip_grad_norm_(
+                ddp_model.parameters(), model_config["grad_clip"])
             
-            if local_rank == 0 and total_epoch % 25 == 0:
-                input_data = []
+            optimizer.step()
             
-            for images, labels in iterator:
-                # train
-                optimizer.zero_grad()
-                x_0 = images.to(device)
-                loss = trainer(x_0).sum() / 1000.
-                loss.backward()
-                
-                torch.nn.utils.clip_grad_norm_(
-                    ddp_model.parameters(), model_config["grad_clip"])
-                
-                optimizer.step()
-                
-                if local_rank == 0:
-                    tqdmDataLoader.set_postfix(ordered_dict={
-                        "epoch": e,
-                        "loss: ": loss.item(),
-                        "img shape: ": x_0.shape,
-                        "LR": optimizer.state_dict()['param_groups'][0]["lr"]
-                    })
-                
-                non_ema_loss += loss.item()
-                len += 1
+            if local_rank == 0:
+                iterator.set_postfix(ordered_dict={
+                    "epoch": e,
+                    "loss: ": loss.item(),
+                    "img shape: ": x_0.shape,
+                    "LR": optimizer.state_dict()['param_groups'][0]["lr"]
+                })
+            
+            non_ema_loss += loss.item()
+            len += 1
+            
+            if local_rank == 0:
                 ema.update(ddp_model.module)
-                
-                input_data.append(x_0)
             
         if local_rank == 0:
             if total_epoch % 25 == 0:
@@ -259,25 +252,13 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
                     model_config["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
                 torch.save(ema.module.state_dict(), os.path.join(
                     model_config["save_weight_dir"], 'ema_iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
-            
-                ema_loss = 0
-                non_ema_loss = 0
-                
-                for images in input_data:
-                    x_0 = images.to(device)
-                    loss = trainer(x_0).sum() / 1000.
-                    non_ema_loss += loss.item()
-                    
-                    loss = ema_trainer(x_0).sum() / 1000.
-                    ema_loss += loss.item()
-                print(f"non-ema average loss: {non_ema_loss / len}, ema average loss: {ema_loss / len}")
             else:
                 if total_epoch % 5 == 0:
                     torch.save(ddp_model.module.state_dict(), os.path.join(
                         model_config["save_weight_dir"], 'ckpt_' + str(total_epoch) + "_.pt"))
                     torch.save(ema.module.state_dict(), os.path.join(
                         model_config["save_weight_dir"], 'ema_ckpt_' + str(total_epoch) + "_.pt"))
-                print(f"average loss: {non_ema_loss / len}")
+            print(f"average loss: {non_ema_loss / len}")
         
         warmUpScheduler.step()
     

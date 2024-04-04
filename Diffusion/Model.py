@@ -23,7 +23,7 @@ class TimeEmbedding(nn.Module):
         assert list(emb.shape) == [T, d_model // 2]
         emb = torch.stack([torch.sin(emb), torch.cos(emb)], dim=-1)
         assert list(emb.shape) == [T, d_model // 2, 2]
-        emb = emb.view(T, d_model)
+        emb = emb.view(T, d_model).contiguous()
 
         self.timembedding = nn.Sequential(
             nn.Embedding.from_pretrained(emb),
@@ -100,16 +100,16 @@ class AttnBlock(nn.Module):
         k = self.proj_k(h)
         v = self.proj_v(h)
 
-        q = q.permute(0, 2, 3, 1).view(B, H * W, C)
-        k = k.view(B, C, H * W)
+        q = q.permute(0, 2, 3, 1).view(B, H * W, C).contiguous()
+        k = k.view(B, C, H * W).contiguous()
         w = torch.bmm(q, k) * (int(C) ** (-0.5))
         assert list(w.shape) == [B, H * W, H * W]
         w = F.softmax(w, dim=-1)
 
-        v = v.permute(0, 2, 3, 1).view(B, H * W, C)
+        v = v.permute(0, 2, 3, 1).view(B, H * W, C).contiguous()
         h = torch.bmm(w, v)
         assert list(h.shape) == [B, H * W, C]
-        h = h.view(B, H, W, C).permute(0, 3, 1, 2)
+        h = h.view(B, H, W, C).permute(0, 3, 1, 2).contiguous()
         h = self.proj(h)
 
         return x + h
