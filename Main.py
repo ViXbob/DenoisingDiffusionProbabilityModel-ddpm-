@@ -1,4 +1,9 @@
-from Diffusion.Train import train, eval, RunMultiGPUTrain
+# import os
+
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1, 2, 3"
+
+from Diffusion.Train import train, eval, RunMultiGPUTrain, RunMultiGPUSample
 import argparse
 import json
 from pathlib import Path
@@ -39,7 +44,10 @@ def main(model_config = None):
         else:
             train(modelConfig)
     else:
-        eval(modelConfig)
+        if model_config['multi_gpu'] is not None:
+            RunMultiGPUSample(model_config['multi_gpu'], modelConfig)
+        else:
+            eval(modelConfig)
 
 if __name__ == '__main__':
     # Arguments parser
@@ -49,15 +57,13 @@ if __name__ == '__main__':
     parser.add_argument('--device', type = str, help = 'The device to use', required=False)
     parser.add_argument('--save_weight_dir', type = str, help = 'The directory to save checkpoints', required=True)
     parser.add_argument('--batch_size', type = int, help = 'Batch size', required=False)
+    parser.add_argument('--multi_gpu', type = int, help = 'Multiple GPUs training', required=False)
     
     # Training arguments
     parser.add_argument('--start_index', type = int, help = 'The start index you store your checkpoints', required=False)
     parser.add_argument('--training_load_weight', type = str, help = 'The name of pretrained weights file', required=False)
-    parser.add_argument('--enable_ema', action = 'store_true', help = 'Whether enable EMA replacing', required=False)
-    parser.add_argument('--ema_update_gap', type = int, help = 'EMA update gap', required=False)
     parser.add_argument('--epoch', type = int, help = 'Total epoch to train', required=False)
     parser.add_argument('--epoch_resume', type = int, help = 'The epoch to resume', required=False)
-    parser.add_argument('--multi_gpu', type = int, help = 'Multiple GPUs training', required=False)
     # End
     
     # Eval arguments
@@ -66,6 +72,7 @@ if __name__ == '__main__':
     parser.add_argument('--test_load_weight', type = str, help = 'File name of eval pre-trained weight', required=False)
     parser.add_argument('--sampled_dir', type = str, help = 'Directory of sampled imgs', required=False)
     parser.add_argument('--sampled_start_index', type = int, help = 'The start index for sampled imgs', required=False)
+    parser.add_argument('--enable_ema', action = 'store_true', help = 'Enable EMA when sampling', required=False)
     args = parser.parse_args()
     # End
     
@@ -83,6 +90,8 @@ if __name__ == '__main__':
     model_config['state'] = args.state
     
     model_config['save_weight_dir'] = args.save_weight_dir
+
+    model_config['multi_gpu'] = args.multi_gpu
     
     if args.state == 'eval':
         if args.sample_number_of_batch == None:
@@ -110,6 +119,7 @@ if __name__ == '__main__':
         else:
             model_config['sampled_start_index'] = args.sampled_start_index
 
+        model_config['enable_ema'] = args.enable_ema
     else:
         if args.start_index == None:
             raise ValueError('Missing start_index')
@@ -118,20 +128,12 @@ if __name__ == '__main__':
 
         model_config['start_index'] = args.start_index
         
-        if args.enable_ema != None:
-            model_config['enable_ema'] = args.enable_ema
-
-        if args.ema_update_gap != None:
-            model_config['ema_update_gap'] = args.ema_update_gaps
-        
         model_config['training_load_weight'] = args.training_load_weight
 
         model_config['epoch'] = args.epoch
         
         if args.epoch_resume != None:
             model_config['epoch_resume'] = args.epoch_resume
-
-        model_config['multi_gpu'] = args.multi_gpu
         
     print(json.dumps(model_config, indent=4))
     

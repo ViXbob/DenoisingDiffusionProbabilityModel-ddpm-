@@ -269,3 +269,52 @@ def RunMultiGPUTrain(world_size, model_config):
              args=(world_size, model_config),
              nprocs=world_size,
              join=True)
+
+def sampleSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
+    print(f"Running DDP sampling on rank {local_rank}.")
+    
+    setup(local_rank, world_size)
+    
+    # load model and evaluate
+    with torch.no_grad():
+        device = torch.device(f"cuda:{local_rank}")
+        net_model = UNet(T=model_config["T"], ch=model_config["channel"], ch_mult=model_config["channel_mult"], attn=model_config["attn"],
+                        num_res_blocks=model_config["num_res_blocks"], dropout=model_config["dropout"]).to(device)
+        
+        if local_rank == 0:
+            if model_config['enable_ema'] == False:
+                net_model.load_state_dict(torch.load(os.path.join(
+                    model_config["save_weight_dir"], model_config["test_load_weight"]), map_location=device))
+                print(f"Pretrained model weights loaded")
+            else:
+                net_model.load_state_dict(torch.load(os.path.join(
+                    model_config["save_weight_dir"], "ema_" + model_config["test_load_weight"]), map_location=device))
+                print(f"Pretrained ema-model weights loaded")
+        
+        ddp_model = DDP(net_model, device_ids=[local_rank])
+
+        ddp_model.eval()
+        
+        sampler = GaussianDiffusionSampler(
+            ddp_model, model_config["beta_1"], model_config["beta_T"], model_config["T"]).to(device)
+        
+        for i in range(model_config['sample_number_of_batch']):
+            # Sampled from standard normal distribution
+            noisyImage = torch.randn(
+                size=[model_config["batch_size"], 3, 32, 32], device=device)
+            if model_config['enable_progress_sampling'] == False:
+                sampledImgs = sampler(noisyImage, i)
+                sampledImgs = sampledImgs * 0.5 + 0.5  # [0 ~ 1]
+                for j in range(model_config['batch_size']):
+                    save_image(sampledImgs[j], os.path.join(
+                        model_config["sampled_dir"],  str(model_config['sampled_start_index'] + local_rank *  model_config["batch_size"] * model_config['sample_number_of_batch'] + i * model_config["batch_size"] + j).zfill(6)) + ".png")
+            else:
+                sampler.progressive_sampling_and_save(noisyImage, [str(os.path.join(model_config["sampled_dir"],  str(model_config['sampled_start_index'] + local_rank *  model_config["batch_size"] * model_config['sample_number_of_batch'] + i * model_config["batch_size"] + j).zfill(6))) for j in range(model_config['batch_size'])], i)
+    
+    cleanup()
+    
+def RunMultiGPUSample(world_size, model_config):
+    mp.spawn(sampleSingleNodeMultiGPU,
+             args=(world_size, model_config),
+             nprocs=world_size,
+             join=True)
