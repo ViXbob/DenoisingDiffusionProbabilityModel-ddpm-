@@ -1,4 +1,4 @@
-from Diffusion.Train import train, eval
+from Diffusion.Train import train, eval, RunMultiGPUTrain
 import argparse
 import json
 from pathlib import Path
@@ -34,7 +34,10 @@ def main(model_config = None):
     Path(model_config['save_weight_dir']).mkdir(parents=True, exist_ok=True)
     Path(model_config['sampled_dir']).mkdir(parents=True, exist_ok=True)
     if modelConfig["state"] == "train":
-        train(modelConfig)
+        if model_config['multi_gpu'] is not None:
+            RunMultiGPUTrain(model_config['multi_gpu'], modelConfig)
+        else:
+            train(modelConfig)
     else:
         eval(modelConfig)
 
@@ -54,6 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--ema_update_gap', type = int, help = 'EMA update gap', required=False)
     parser.add_argument('--epoch', type = int, help = 'Total epoch to train', required=False)
     parser.add_argument('--epoch_resume', type = int, help = 'The epoch to resume', required=False)
+    parser.add_argument('--multi_gpu', type = int, help = 'Multiple GPUs training', required=False)
     # End
     
     # Eval arguments
@@ -127,6 +131,8 @@ if __name__ == '__main__':
         if args.epoch_resume != None:
             model_config['epoch_resume'] = args.epoch_resume
 
+        model_config['multi_gpu'] = args.multi_gpu
+        
     print(json.dumps(model_config, indent=4))
     
     main(model_config)
