@@ -123,10 +123,16 @@ def eval(modelConfig: Dict):
         device = torch.device(modelConfig["device"])
         model = UNet(T=modelConfig["T"], ch=modelConfig["channel"], ch_mult=modelConfig["channel_mult"], attn=modelConfig["attn"],
                      num_res_blocks=modelConfig["num_res_blocks"], dropout=0.)
-        ckpt = torch.load(os.path.join(
-            modelConfig["save_weight_dir"], modelConfig["test_load_weight"]), map_location=device)
-        model.load_state_dict(ckpt)
-        print("model load weight done.")
+        # Load model
+        if modelConfig['enable_ema'] == False:
+            model.load_state_dict(torch.load(os.path.join(
+                modelConfig["save_weight_dir"], modelConfig["test_load_weight"]), map_location=device))
+            print(f"Pretrained model weights loaded")
+        else:
+            model.load_state_dict(torch.load(os.path.join(
+                modelConfig["save_weight_dir"], "ema_" + modelConfig["test_load_weight"]), map_location=device))
+            print(f"Pretrained ema-model weights loaded")
+        
         model.eval()
         sampler = GaussianDiffusionSampler(
             model, modelConfig["beta_1"], modelConfig["beta_T"], modelConfig["T"]).to(device)
