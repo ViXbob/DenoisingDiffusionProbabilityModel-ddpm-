@@ -73,6 +73,7 @@ if __name__ == '__main__':
     parser.add_argument('--sampled_dir', type = str, help = 'Directory of sampled imgs', required=False)
     parser.add_argument('--sampled_start_index', type = int, help = 'The start index for sampled imgs', required=False)
     parser.add_argument('--enable_ema', action = 'store_true', help = 'Enable EMA when sampling', required=False)
+    parser.add_argument('--ema_evaluation_gap', type = int, help = 'The epoch gap of EMA model evaluation', required=False, default=25)
     args = parser.parse_args()
     # End
     
@@ -135,6 +136,7 @@ if __name__ == '__main__':
         if args.epoch_resume != None:
             model_config['epoch_resume'] = args.epoch_resume
         
+        model_config['ema_evaluation_gap'] = args.ema_evaluation_gap
     print(json.dumps(model_config, indent=4))
     
     main(model_config)

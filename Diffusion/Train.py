@@ -39,7 +39,7 @@ def train(modelConfig: Dict):
     if modelConfig["training_load_weight"] is not None:
         net_model.load_state_dict(torch.load(os.path.join(
             modelConfig["save_weight_dir"], modelConfig["training_load_weight"]), map_location=device))
-        ema.load_state_dict(torch.load(os.path.join(
+        ema.module.load_state_dict(torch.load(os.path.join(
             modelConfig["save_weight_dir"], "ema_" + modelConfig["training_load_weight"]), map_location=device))
         print(f"Pretrained model weights loaded")
     
@@ -55,6 +55,8 @@ def train(modelConfig: Dict):
     ema_trainer = GaussianDiffusionTrainer(
         ema.module, modelConfig["beta_1"], modelConfig["beta_T"], modelConfig["T"]).to(device)
     
+    ema_evaluation_gap = modelConfig['ema_evaluation_gap']
+    
     total_epoch = modelConfig["start_index"]
     
     for e in range(modelConfig["epoch"]):
@@ -64,10 +66,10 @@ def train(modelConfig: Dict):
             warmUpScheduler.step()
             continue
         
+        non_ema_loss = 0
+        len = 0
+        
         with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
-            non_ema_loss = 0
-            len = 0
-            
             for images, labels in tqdmDataLoader:
                 # train
                 optimizer.zero_grad()
@@ -99,11 +101,10 @@ def train(modelConfig: Dict):
                 torch.save(ema.module.state_dict(), os.path.join(
                     modelConfig["save_weight_dir"], 'ema_iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
                 
-                tqdmDataLoader.set_postfix(ordered_dict={})
-                
-                ema_loss = 0
-                non_ema_loss = 0
-                
+        if total_epoch % ema_evaluation_gap == 0:
+            ema_loss = 0
+            non_ema_loss = 0
+            with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
                 for images, _ in tqdmDataLoader:
                     x_0 = images.to(device)
                     loss = trainer(x_0).sum() / 1000.
@@ -111,9 +112,10 @@ def train(modelConfig: Dict):
                     
                     loss = ema_trainer(x_0).sum() / 1000.
                     ema_loss += loss.item()
-                print(f"non-ema average loss: {non_ema_loss / len}, ema average loss: {ema_loss / len}")
-            else:
-                print(f"average loss: {non_ema_loss / len}")
+            
+            print(f"non-ema average loss: {non_ema_loss / len}, ema average loss: {ema_loss / len}")
+        else:
+            print(f"average loss: {non_ema_loss / len}")
         
         warmUpScheduler.step()
 
@@ -191,15 +193,17 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
     
     if local_rank == 0:
         ema = ModelEmaV2(net_model, decay=0.9999, device=device)
-        # ema_trainer = GaussianDiffusionTrainer(
-        #     ema.module, model_config["beta_1"], model_config["beta_T"], model_config["T"]).to(device)
+        ema_trainer = GaussianDiffusionTrainer(
+            ema.module, model_config["beta_1"], model_config["beta_T"], model_config["T"]).to(device)
     
         if model_config["training_load_weight"] is not None:
             net_model.load_state_dict(torch.load(os.path.join(
                 model_config["save_weight_dir"], model_config["training_load_weight"]), map_location=device))
-            ema.load_state_dict(torch.load(os.path.join(
+            ema.module.load_state_dict(torch.load(os.path.join(
                 model_config["save_weight_dir"], "ema_" + model_config["training_load_weight"]), map_location=device))
             print(f"Pretrained model weights loaded")
+        
+        ema_evaluation_gap = model_config['ema_evaluation_gap']
     
     ddp_model = DDP(net_model, device_ids=[local_rank])
     
@@ -224,8 +228,9 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
             continue
             
         train_sampler.set_epoch(e)
-        iterator = tqdm(dataloader, dynamic_ncols=True) if local_rank == 0 else dataloader
+        iterator = tqdm(dataloader, dynamic_ncols=True)
         len = 0
+        
         for images, labels in iterator:
             # train
             optimizer.zero_grad()
@@ -255,16 +260,30 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
         if local_rank == 0:
             if total_epoch % 25 == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(
-                    model_config["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
+                    model_config["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len // world_size)) + "0k_.pt"))
                 torch.save(ema.module.state_dict(), os.path.join(
-                    model_config["save_weight_dir"], 'ema_iterations_ckpt_' + str(total_epoch // (10000 // len)) + "0k_.pt"))
+                    model_config["save_weight_dir"], 'ema_iterations_ckpt_' + str(total_epoch // (10000 // len // world_size)) + "0k_.pt"))
             else:
                 if total_epoch % 5 == 0:
                     torch.save(ddp_model.module.state_dict(), os.path.join(
                         model_config["save_weight_dir"], 'ckpt_' + str(total_epoch) + "_.pt"))
                     torch.save(ema.module.state_dict(), os.path.join(
                         model_config["save_weight_dir"], 'ema_ckpt_' + str(total_epoch) + "_.pt"))
-            print(f"average loss: {non_ema_loss / len}")
+            if total_epoch % ema_evaluation_gap == 0:
+                ema_loss = 0
+                non_ema_loss = 0
+                with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
+                    for images, _ in tqdmDataLoader:
+                        x_0 = images.to(device)
+                        loss = trainer(x_0).sum() / 1000.
+                        non_ema_loss += loss.item()
+                        
+                        loss = ema_trainer(x_0).sum() / 1000.
+                        ema_loss += loss.item()
+                
+                print(f"non-ema average loss: {non_ema_loss / len}, ema average loss: {ema_loss / len}")
+            else:
+                print(f"average loss: {non_ema_loss / len}")
         
         warmUpScheduler.step()
     
