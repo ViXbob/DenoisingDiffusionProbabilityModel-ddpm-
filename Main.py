@@ -64,6 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--training_load_weight', type = str, help = 'The name of pretrained weights file', required=False)
     parser.add_argument('--epoch', type = int, help = 'Total epoch to train', required=False)
     parser.add_argument('--epoch_resume', type = int, help = 'The epoch to resume', required=False)
+    parser.add_argument('--ema_evaluation_gap', type = int, help = 'The epoch gap of EMA model evaluation', required=False, default=25)
     # End
     
     # Eval arguments
@@ -73,7 +74,6 @@ if __name__ == '__main__':
     parser.add_argument('--sampled_dir', type = str, help = 'Directory of sampled imgs', required=False)
     parser.add_argument('--sampled_start_index', type = int, help = 'The start index for sampled imgs', required=False)
     parser.add_argument('--enable_ema', action = 'store_true', help = 'Enable EMA when sampling', required=False)
-    parser.add_argument('--ema_evaluation_gap', type = int, help = 'The epoch gap of EMA model evaluation', required=False, default=25)
     args = parser.parse_args()
     # End
     

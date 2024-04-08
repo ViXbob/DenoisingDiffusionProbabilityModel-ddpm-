@@ -270,17 +270,12 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
                     torch.save(ema.module.state_dict(), os.path.join(
                         model_config["save_weight_dir"], 'ema_ckpt_' + str(total_epoch) + "_.pt"))
             if total_epoch % ema_evaluation_gap == 0:
-                ema_loss = 0
                 non_ema_loss = 0
                 with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
                     for images, _ in tqdmDataLoader:
                         x_0 = images.to(device)
-                        loss = trainer(x_0).sum() / 1000.
-                        non_ema_loss += loss.item()
-                        
                         loss = ema_trainer(x_0).sum() / 1000.
                         ema_loss += loss.item()
-                
                 print(f"non-ema average loss: {non_ema_loss / len}, ema average loss: {ema_loss / len}")
             else:
                 print(f"average loss: {non_ema_loss / len}")
