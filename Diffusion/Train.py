@@ -191,19 +191,18 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
     net_model = UNet(T=model_config["T"], ch=model_config["channel"], ch_mult=model_config["channel_mult"], attn=model_config["attn"],
                      num_res_blocks=model_config["num_res_blocks"], dropout=model_config["dropout"]).to(device)
     
-    if local_rank == 1:
+    if local_rank == 0:
         ema = ModelEmaV2(net_model, decay=0.9999, device=device)
-        ema_trainer = GaussianDiffusionTrainer(
-            ema.module, model_config["beta_1"], model_config["beta_T"], model_config["T"]).to(device)
-        ema_evaluation_gap = model_config['ema_evaluation_gap']
-    
-    if model_config["training_load_weight"] is not None:
+        # ema_trainer = GaussianDiffusionTrainer(
+        #     ema.module, model_config["beta_1"], model_config["beta_T"], model_config["T"]).to(device)
+        # ema_evaluation_gap = model_config['ema_evaluation_gap']
         net_model.load_state_dict(torch.load(os.path.join(
             model_config["save_weight_dir"], model_config["training_load_weight"]), map_location=device))
+        print(f"Pretrained model weights loaded on {local_rank}")
         ema.module.load_state_dict(torch.load(os.path.join(
             model_config["save_weight_dir"], "ema_" + model_config["training_load_weight"]), map_location=device))
-        print(f"Pretrained model weights loaded on {local_rank}")
-    
+        print(f"Pretrained ema-model weights loaded on {local_rank}")
+        
     ddp_model = DDP(net_model, device_ids=[local_rank])
     
     trainer = GaussianDiffusionTrainer(
@@ -252,10 +251,10 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
             non_ema_loss += loss.item()
             len += 1
             
-            if local_rank == 1:
+            if local_rank == 0:
                 ema.update(ddp_model.module)
             
-        if local_rank == 1:
+        if local_rank == 0:
             if total_epoch % 25 == 0:
                 torch.save(ddp_model.module.state_dict(), os.path.join(
                     model_config["save_weight_dir"], 'iterations_ckpt_' + str(total_epoch // (10000 // len // world_size)) + "0k_.pt"))
@@ -267,19 +266,19 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
                         model_config["save_weight_dir"], 'ckpt_' + str(total_epoch) + "_.pt"))
                     torch.save(ema.module.state_dict(), os.path.join(
                         model_config["save_weight_dir"], 'ema_ckpt_' + str(total_epoch) + "_.pt"))
-            if total_epoch % ema_evaluation_gap == 0:
-                ema_loss = 0
-                non_ema_loss = 0
-                with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
-                    for images, _ in tqdmDataLoader:
-                        x_0 = images.to(device)
-                        loss = trainer(x_0).sum() / 1000.
-                        non_ema_loss += loss.item()
+            # if total_epoch % ema_evaluation_gap == 0:
+            #     ema_loss = 0
+            #     non_ema_loss = 0
+            #     with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
+            #         for images, _ in tqdmDataLoader:
+            #             x_0 = images.to(device)
+            #             loss = trainer(x_0).sum() / 1000.
+            #             non_ema_loss += loss.item()
                         
-                        loss = ema_trainer(x_0).sum() / 1000.
-                        ema_loss += loss.item()
-            else:
-                print(f"average loss: {non_ema_loss / len}")
+            #             loss = ema_trainer(x_0).sum() / 1000.
+            #             ema_loss += loss.item()
+            # else:
+            print(f"average loss: {non_ema_loss / len}")
         
         warmUpScheduler.step()
     
