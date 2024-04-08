@@ -68,7 +68,7 @@ class DownSample(nn.Module):
 
 
 class UpSample(nn.Module):
-    def __init__(self, in_ch, with_conv):
+    def __init__(self, in_ch, with_conv = True):
         super().__init__()
         self.with_conv = with_conv
         self.main = nn.Conv2d(in_ch, in_ch, 3, stride=1, padding=1)
