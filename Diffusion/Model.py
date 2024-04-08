@@ -5,18 +5,19 @@ import torch
 from torch import nn
 from torch.nn import init
 from torch.nn import functional as F
+from torch.nn import SiLU as Swish
 
+# class Swish(nn.Module):
+#     def forward(self, x):
+#         return x * torch.sigmoid(x)
 
-class Swish(nn.Module):
-    def forward(self, x):
-        return x * torch.sigmoid(x)
-
-
+# Checked, equivalent with DDPM implementation
 class TimeEmbedding(nn.Module):
     def __init__(self, T, d_model, dim):
         assert d_model % 2 == 0
         super().__init__()
-        emb = torch.arange(0, d_model, step=2) / d_model * math.log(10000)
+        # emb = torch.arange(0, d_model, step=2) / d_model * math.log(10000) # Attention is all you need implementation
+        emb = torch.arange(0, d_model, step=2) / 2 / (d_model // 2 - 1) * math.log(10000) # implementation in DDPM
         emb = torch.exp(-emb)
         pos = torch.arange(T).float()
         emb = pos[:, None] * emb[None, :]
@@ -45,9 +46,10 @@ class TimeEmbedding(nn.Module):
 
 
 class DownSample(nn.Module):
-    def __init__(self, in_ch):
+    def __init__(self, in_ch, with_conv = True):
         super().__init__()
-        self.main = nn.Conv2d(in_ch, in_ch, 3, stride=2, padding=1)
+        self.with_conv = with_conv
+        self.main = nn.Conv2d(in_ch, in_ch, 3, stride=2, padding=0)
         self.initialize()
 
     def initialize(self):
@@ -55,13 +57,20 @@ class DownSample(nn.Module):
         init.zeros_(self.main.bias)
 
     def forward(self, x, temb):
-        x = self.main(x)
+        if self.with_conv:
+            # no asymmetric padding in torch conv, must do it to align with tensorflow
+            pad = (0,1,0,1)
+            x = torch.nn.functional.pad(x, pad, mode="constant", value=0)
+            x = self.main(x)
+        else:
+            x = torch.nn.functional.avg_pool2d(x, kernel_size=2, stride=2)
         return x
 
 
 class UpSample(nn.Module):
-    def __init__(self, in_ch):
+    def __init__(self, in_ch, with_conv):
         super().__init__()
+        self.with_conv = with_conv
         self.main = nn.Conv2d(in_ch, in_ch, 3, stride=1, padding=1)
         self.initialize()
 
@@ -72,15 +81,16 @@ class UpSample(nn.Module):
     def forward(self, x, temb):
         _, _, H, W = x.shape
         x = F.interpolate(
-            x, scale_factor=2, mode='nearest')
-        x = self.main(x)
+            x, scale_factor=2.0, mode='nearest')
+        if self.with_conv:
+            x = self.main(x)
         return x
 
 
 class AttnBlock(nn.Module):
     def __init__(self, in_ch):
         super().__init__()
-        self.group_norm = nn.GroupNorm(32, in_ch)
+        self.group_norm = nn.GroupNorm(32, in_ch, eps=1e-6)
         self.proj_q = nn.Conv2d(in_ch, in_ch, 1, stride=1, padding=0)
         self.proj_k = nn.Conv2d(in_ch, in_ch, 1, stride=1, padding=0)
         self.proj_v = nn.Conv2d(in_ch, in_ch, 1, stride=1, padding=0)
@@ -95,10 +105,10 @@ class AttnBlock(nn.Module):
 
     def forward(self, x):
         B, C, H, W = x.shape
-        h = self.group_norm(x)
-        q = self.proj_q(h)
-        k = self.proj_k(h)
-        v = self.proj_v(h)
+        h = self.group_norm(x) # h = B * C * H * W
+        q = self.proj_q(h)     # q = B * C * H * W
+        k = self.proj_k(h)     # k = B * C * H * W
+        v = self.proj_v(h)     # v = B * C * H * W
 
         q = q.permute(0, 2, 3, 1).view(B, H * W, C).contiguous()
         k = k.view(B, C, H * W).contiguous()
@@ -119,7 +129,7 @@ class ResBlock(nn.Module):
     def __init__(self, in_ch, out_ch, tdim, dropout, attn=False):
         super().__init__()
         self.block1 = nn.Sequential(
-            nn.GroupNorm(32, in_ch),
+            nn.GroupNorm(32, in_ch, eps=1e-6),
             Swish(),
             nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1),
         )
@@ -128,11 +138,12 @@ class ResBlock(nn.Module):
             nn.Linear(tdim, out_ch),
         )
         self.block2 = nn.Sequential(
-            nn.GroupNorm(32, out_ch),
+            nn.GroupNorm(32, out_ch, eps=1e-6),
             Swish(),
             nn.Dropout(dropout),
             nn.Conv2d(out_ch, out_ch, 3, stride=1, padding=1),
         )
+        # nn.Conv2d is equivalent to the nin network in DDPM implementation
         if in_ch != out_ch:
             self.shortcut = nn.Conv2d(in_ch, out_ch, 1, stride=1, padding=0)
         else:
@@ -201,7 +212,7 @@ class UNet(nn.Module):
         assert len(chs) == 0
 
         self.tail = nn.Sequential(
-            nn.GroupNorm(32, now_ch),
+            nn.GroupNorm(32, now_ch, eps=1e-6),
             Swish(),
             nn.Conv2d(now_ch, 3, 3, stride=1, padding=1)
         )

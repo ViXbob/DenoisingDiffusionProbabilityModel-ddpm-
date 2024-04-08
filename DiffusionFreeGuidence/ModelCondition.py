@@ -89,7 +89,7 @@ class UpSample(nn.Module):
 class AttnBlock(nn.Module):
     def __init__(self, in_ch):
         super().__init__()
-        self.group_norm = nn.GroupNorm(32, in_ch)
+        self.group_norm = nn.GroupNorm(32, in_ch, eps=1e-6)
         self.proj_q = nn.Conv2d(in_ch, in_ch, 1, stride=1, padding=0)
         self.proj_k = nn.Conv2d(in_ch, in_ch, 1, stride=1, padding=0)
         self.proj_v = nn.Conv2d(in_ch, in_ch, 1, stride=1, padding=0)
@@ -122,7 +122,7 @@ class ResBlock(nn.Module):
     def __init__(self, in_ch, out_ch, tdim, dropout, attn=True):
         super().__init__()
         self.block1 = nn.Sequential(
-            nn.GroupNorm(32, in_ch),
+            nn.GroupNorm(32, in_ch, eps=1e-6),
             Swish(),
             nn.Conv2d(in_ch, out_ch, 3, stride=1, padding=1),
         )
@@ -135,7 +135,7 @@ class ResBlock(nn.Module):
             nn.Linear(tdim, out_ch),
         )
         self.block2 = nn.Sequential(
-            nn.GroupNorm(32, out_ch),
+            nn.GroupNorm(32, out_ch, eps=1e-6),
             Swish(),
             nn.Dropout(dropout),
             nn.Conv2d(out_ch, out_ch, 3, stride=1, padding=1),
@@ -197,7 +197,7 @@ class UNet(nn.Module):
         assert len(chs) == 0
 
         self.tail = nn.Sequential(
-            nn.GroupNorm(32, now_ch),
+            nn.GroupNorm(32, now_ch, eps=1e-6),
             Swish(),
             nn.Conv2d(now_ch, 3, 3, stride=1, padding=1)
         )
