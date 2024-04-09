@@ -107,10 +107,10 @@ def train(modelConfig: Dict):
             with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
                 for images, _ in tqdmDataLoader:
                     x_0 = images.to(device)
-                    loss = trainer(x_0).sum() / 1000.
+                    loss = trainer(x_0)
                     non_ema_loss += loss.item()
                     
-                    loss = ema_trainer(x_0).sum() / 1000.
+                    loss = ema_trainer(x_0)
                     ema_loss += loss.item()
             
             print(f"non-ema average loss: {non_ema_loss / len}, ema average loss: {ema_loss / len}")
@@ -233,7 +233,7 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
             # train
             optimizer.zero_grad()
             x_0 = images.to(device)
-            loss = trainer(x_0).sum() / 1000.
+            loss = trainer(x_0)
             loss.backward()
             
             torch.nn.utils.clip_grad_norm_(
@@ -272,10 +272,10 @@ def trainSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
             #     with tqdm(dataloader, dynamic_ncols=True) as tqdmDataLoader:
             #         for images, _ in tqdmDataLoader:
             #             x_0 = images.to(device)
-            #             loss = trainer(x_0).sum() / 1000.
+            #             loss = trainer(x_0)
             #             non_ema_loss += loss.item()
                         
-            #             loss = ema_trainer(x_0).sum() / 1000.
+            #             loss = ema_trainer(x_0)
             #             ema_loss += loss.item()
             # else:
             print(f"average loss: {non_ema_loss / len}")
