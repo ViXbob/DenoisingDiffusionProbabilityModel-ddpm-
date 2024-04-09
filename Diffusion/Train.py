@@ -74,7 +74,7 @@ def train(modelConfig: Dict):
                 # train
                 optimizer.zero_grad()
                 x_0 = images.to(device)
-                loss = trainer(x_0).sum() / 1000.
+                loss = trainer(x_0)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
                     net_model.parameters(), modelConfig["grad_clip"])

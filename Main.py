@@ -7,8 +7,10 @@ from Diffusion.Train import train, eval, RunMultiGPUTrain, RunMultiGPUSample
 import argparse
 import json
 from pathlib import Path
+from torchvision.datasets import CIFAR10, CelebA
+from torchvision import transforms
 
-def main(model_config = None):
+def main_cifar(model_config = None):
     modelConfig = {
         "state": "train", # or eval
         "epoch": 50,
@@ -49,6 +51,28 @@ def main(model_config = None):
         else:
             eval(modelConfig)
 
+def main_celebahq(model_config):
+    Path(model_config['save_weight_dir']).mkdir(parents=True, exist_ok=True)
+    Path(model_config['sampled_dir']).mkdir(parents=True, exist_ok=True)
+    dataset = CIFAR10(
+        root='./CIFAR10', train=True, download=True,
+        transform=transforms.Compose([
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]))
+    if model_config["state"] == "train":
+        if model_config['multi_gpu'] is not None:
+            RunMultiGPUTrain(model_config['multi_gpu'], model_config)
+        else:
+            train(model_config)
+    else:
+        if model_config['multi_gpu'] is not None:
+            RunMultiGPUSample(model_config['multi_gpu'], model_config)
+        else:
+            eval(model_config)
+    pass
+
 if __name__ == '__main__':
     # Arguments parser
     parser = argparse.ArgumentParser(description = "Train or eval using DDPM")
@@ -58,6 +82,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_weight_dir', type = str, help = 'The directory to save checkpoints', required=True)
     parser.add_argument('--batch_size', type = int, help = 'Batch size', required=False)
     parser.add_argument('--multi_gpu', type = int, help = 'Multiple GPUs training', required=False)
+    parser.add_argument('--dataset', type = str, help = "Choose from CelebaHQ, CIFAR-10", required=True, choices=["celebahq", "cifar10"])
     
     # Training arguments
     parser.add_argument('--start_index', type = int, help = 'The start index you store your checkpoints', required=False)
@@ -139,4 +164,6 @@ if __name__ == '__main__':
         model_config['ema_evaluation_gap'] = args.ema_evaluation_gap
     print(json.dumps(model_config, indent=4))
     
-    main(model_config)
+    if args.dataset == "cifar10":
+    
+        main_cifar(model_config)

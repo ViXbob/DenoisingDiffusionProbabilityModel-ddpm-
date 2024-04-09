@@ -134,3 +134,6 @@ Checkpoints*/
 SampledImgs*/
 
 *.png
+
+CelebA/*
+celeba_hq_256/*

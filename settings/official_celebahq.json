@@ -1,24 +1,24 @@
 {
   "channel": 128,
-  "channel_mult": [1, 2, 2, 2],
-  "attn": [1],
+  "channel_mult": [1, 1, 2, 2, 4, 4],
+  "attn": [4],
   "num_res_blocks": 2,
-  "dropout": 0.1,
+  "dropout": 0.0,
 
   "state": "train",
-  "epoch": 2000,
-  "batch_size": 125,
+  "epoch": 1000,
+  "batch_size": 60,
   "T": 1000,
 
   "lr": 1e-4,
   "multiplier": 2.0,
   "beta_1": 1e-4,
   "beta_T": 0.02,
-  "img_size": 32,
+  "img_size": 256,
   "grad_clip": 1.0,
   "device": "cuda:0",
-  "save_weight_dir": "./Checkpoints_official_cifar/",
-  "sampled_dir": "./SampledImgs_official_cifar/",
+  "save_weight_dir": "./Checkpoints_official_celebahq/",
+  "sampled_dir": "./SampledImgs_official_celebahq/",
   "enable_ema": false,
   "ema_update_gap": 20
 }
