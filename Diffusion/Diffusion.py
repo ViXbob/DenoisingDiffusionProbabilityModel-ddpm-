@@ -69,6 +69,7 @@ class GaussianDiffusion(nn.Module):
         assert isinstance(betas, torch.Tensor)
         assert (betas > 0).all() and (betas <= 1).all()
         assert T == len(betas)
+        self.T = T
         self.mean_type = model_mean_type
         self.var_type = model_var_type
         self.loss_type = loss_type
@@ -95,13 +96,18 @@ class GaussianDiffusion(nn.Module):
         # mean of q(x_{t - 1} | x_t, x_0) = posterior_mean_coef1 * x_0 + posterior_mean_coef2 * x_t
         self.register_buffer('posterior_mean_coef1', betas * torch.sqrt(self.alphas_bar_prev) / (1. - self.alphas_bar))
         self.register_buffer('posterior_mean_coef2', (1. - self.alphas_bar_prev) * torch.sqrt(self.alphas) / (1. - self.alphas_bar))
+        
+        self.register_buffer('log_betas', torch.log(torch.cat((self.posterior_variance[1:2], self.betas[1:]), dim = 0)))
+        
+        self.register_buffer('coeff1', torch.sqrt(1. / self.alphas))
+        self.register_buffer('coeff2', self.coeff1 * (1. - self.alphas) / torch.sqrt(1. - self.alphas_bar))
 
     def q_sample(self, x_0, t, noise = None):
         """
         Sample x_t condition on x_0
         """
         if noise is None:
-            noise = torch.rand_like((x_0))
+            noise = torch.randn_like(x_0)
             
         assert noise.shape == x_0.shape
         
@@ -143,17 +149,17 @@ class GaussianDiffusion(nn.Module):
             # below: only log_variance is used in the KL computations
             model_variance, model_log_variance = {
                 # for fixedlarge, we set the initial (log-)variance like so to get a better decoder log likelihood
-                'fixedlarge': (self.betas, torch.log(torch.cat((self.posterior_variance[1:2], self.betas[1:]), dim = 0)).to(x_t.device)),
+                'fixedlarge': (self.betas, self.log_betas),
                 'fixedsmall': (self.posterior_variance, self.posterior_log_variance_clipped),
             }[self.var_type]
             # variance shape will be (bs, 3, size, size)
-            model_variance = extract(model_variance, t, x_t.shape) * torch.ones(x_t.shape).to(x_t.device)
-            model_log_variance = extract(model_log_variance, t, x_t.shape) * torch.ones(x_t.shape).to(x_t.device)
+            model_variance = extract(model_variance, t, x_t.shape) * torch.ones(x_t.shape, device=x_t.device)
+            model_log_variance = extract(model_log_variance, t, x_t.shape) * torch.ones(x_t.shape, device=x_t.device)
         else:
             raise NotImplementedError(self.var_type)
         
         # Mean parameterization
-        _maybe_clip = lambda x_: (torch.clip(x_, -1., 1.) if clip_denoised else x_)
+        _maybe_clip = lambda x_: (torch.clamp(x_, -1., 1.) if clip_denoised else x_)
         if self.mean_type == 'xprev':
             raise NotImplementedError(self.mean_type)
         elif self.mean_type == 'xstart':
@@ -166,7 +172,7 @@ class GaussianDiffusion(nn.Module):
 
         assert model_mean.shape == model_log_variance.shape == pred_xstart.shape == x_t.shape
         
-        if return_x0:
+        if return_x0 == True:
             return model_mean, model_variance, model_log_variance, pred_xstart
         else:
             return model_mean, model_variance, model_log_variance
@@ -182,18 +188,12 @@ class GaussianDiffusion(nn.Module):
         x_t = self.q_sample(x_0, t, noise)
         return F.mse_loss(self.model(x_t, t), noise, reduction = 'none').mean((1, 2, 3))
 
-    def KL_divergence(self, x_0, t, noise = None):
+    def KL_divergence(self, x_0, x_t, t, clip_denoised: bool = False, return_x0: bool = False):
         assert t.shape[0] == x_0.shape[0]
-        
-        if noise is None:
-            noise = torch.randn_like(x_0)
-        
-        assert noise.shape == x_0.shape
-            
-        x_t = self.q_sample(x_0, t, noise)
+        assert x_0.shape == x_t.shape
         
         true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(x_0 = x_0, x_t = x_t, t = t)
-        model_mean, _, model_log_variance, pred_x0 = self.p_theta_mean_variance(x_t = x_t, t = t, clip_denoised = False, return_x0 = True)
+        model_mean, _, model_log_variance, pred_x0 = self.p_theta_mean_variance(x_t = x_t, t = t, clip_denoised = clip_denoised, return_x0 = True)
         
         kl = normal_kl(true_mean, true_log_variance_clipped, model_mean, model_log_variance).mean((1, 2, 3)) # / math.log(2.)
         
@@ -201,12 +201,65 @@ class GaussianDiffusion(nn.Module):
         x_0, means=model_mean, log_scales=0.5 * model_log_variance)
         assert decoder_nll.shape == x_0.shape
         
-        decoder_nll = decoder_nll.mean((1, 2, 3)) #  / math.log(2.)
+        decoder_nll = decoder_nll.mean((1, 2, 3)) # / math.log(2.)
         
         # At the first timestep return the decoder NLL, otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
         output = torch.where(t == 0, decoder_nll, kl)
         
-        return output
+        return (output, pred_x0) if return_x0 else output
+    
+    def calc_rate_distortion(self, x_0, device, clip_denoised: bool = True):
+        KLs = []
+        distortions = []
+        with tqdm(range(self.T), desc="Rate & Distortion Computing") as progress:
+            for time_step_ in progress:
+                time_step = self.T - time_step_ - 1
+                t = x_0.new_ones([x_0.shape[0], ], dtype=torch.long) * time_step
+                
+                kl, pred_x0 = self.KL_divergence(x_0, self.q_sample(x_0, t), t, clip_denoised = False, return_x0 = True)
+                KLs.append(kl)
+                distortions.append(torch.sqrt(F.mse_loss(x_0 * 0.5 + 0.5, torch.clamp(pred_x0 * 0.5 + 0.5, 0, 1), reduction='mean')))
+        
+        return torch.stack(KLs, dim = 0), torch.stack(distortions, dim = 0)
+    
+    # def sample_with_KL(self, batch_size, device):
+    #     x_T = torch.randn(size=[batch_size, 3, 32, 32], device=device)
+        
+    #     x_t = x_T
+    #     noises = []
+    #     with tqdm(range(self.T), desc="Sampling Processing") as progress:
+    #         for time_step_ in progress:
+    #             time_step = self.T - time_step_ - 1
+    #             t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
+    #             mean, var, _ = self.p_theta_mean_variance(x_t=x_t, t=t, clip_denoised = False, return_x0 = False)
+    #             # no noise when t == 0
+    #             if time_step > 0:
+    #                 noise = torch.randn_like(x_t)
+    #             else:
+    #                 noise = 0
+    #             x_t = mean + torch.sqrt(var) * noise
+                
+    #             noises.append(noise)
+                
+    #             assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
+        
+    #     x_0 = torch.clip(x_t, -1, 1)
+    #     KLs = []
+    #     distortions = []
+        
+    #     x_t = x_T
+    #     with tqdm(range(self.T), desc="Rate & Distortion Computing") as progress:
+    #         for time_step_ in progress:
+    #             time_step = self.T - time_step_ - 1
+    #             t = x_t.new_ones([x_T.shape[0], ], dtype=torch.long) * time_step
+    #             mean, var, _, pred_x0 = self.p_theta_mean_variance(x_t=x_t, t=t, clip_denoised = False, return_x0=True)
+                
+    #             KLs.append(self.KL_divergence(x_0, x_t, t))
+    #             distortions.append(torch.sqrt(F.mse_loss(x_0 * 0.5 + 0.5, torch.clamp(pred_x0 * 0.5 + 0.5, 0, 1), reduction='mean')) * 255.)
+                
+    #             x_t = mean + torch.sqrt(var) * noises[time_step_]
+                
+    #     return x_0, torch.stack(KLs, dim = 0), torch.stack(distortions, dim = 0)
 
 class GaussianDiffusionTrainer(nn.Module):
     def __init__(self, model, beta_1, beta_T, T):
