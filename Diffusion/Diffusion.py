@@ -362,11 +362,16 @@ class GaussianDiffusionSampler(nn.Module):
         x_0 = x_t
         return torch.clip(x_0, -1, 1)
     
-    def progressive_sampling_and_save(self, x_T, paths: List[str], batch_id: int):
+    def progressive_sampling_and_save(self, x_T, path: str, img_ids: List[int], batch_id: int):
         x_t = x_T
-        for index, path in enumerate(paths):
-            Path(path).mkdir(parents=True, exist_ok=True)
-            save_image(torch.clamp(x_t[index] * 0.5 + 0.5, 0, 1), os.path.join(path, "00.png"))
+        # for index, path in enumerate(paths):
+        #     Path(path).mkdir(parents=True, exist_ok=True)
+        #     save_image(torch.clamp(x_t[index] * 0.5 + 0.5, 0, 1), os.path.join(path, "00.png"))
+        
+        (Path(path) / "00").mkdir(parents=True, exist_ok=True)
+        for index, img_index in enumerate(img_ids):
+            save_image(torch.clamp(x_t[index] * 0.5 + 0.5, 0, 1), os.path.join(path, "00", str(img_index).zfill(6) + ".png"))
+        
         with tqdm(range(self.T), desc="Sampling Processing") as progress:
             progress.set_postfix(ordered_dict={
                 "batch": batch_id
@@ -384,9 +389,12 @@ class GaussianDiffusionSampler(nn.Module):
                 assert torch.isnan(x_t).int().sum() == 0, "nan in tensor."
                 
                 if time_step % 50 == 0:
-                    for index, path in enumerate(paths):
-                        save_image(torch.clamp(pred_x0[index] * 0.5 + 0.5, 0, 1), os.path.join(
-                            path,  str(20 - time_step // 50).zfill(2) + ".png"))
+                    (Path(path) / str(20 - time_step // 50).zfill(2)).mkdir(parents=True, exist_ok=True)
+                    for index, img_index in enumerate(img_ids):
+                        save_image(torch.clamp(pred_x0[index] * 0.5 + 0.5, 0, 1), os.path.join(path, str(20 - time_step // 50).zfill(2), str(img_index).zfill(6) + ".png"))
+                    # for index, path in enumerate(paths):
+                    #     save_image(torch.clamp(pred_x0[index] * 0.5 + 0.5, 0, 1), os.path.join(
+                    #         path,  str(20 - time_step // 50).zfill(2) + ".png"))
                 
 
         x_0 = x_t

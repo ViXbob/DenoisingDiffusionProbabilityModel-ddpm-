@@ -149,7 +149,8 @@ def eval(modelConfig: Dict):
                     save_image(sampledImgs[j], os.path.join(
                         modelConfig["sampled_dir"],  str(modelConfig['sampled_start_index'] + i * modelConfig["batch_size"] + j).zfill(6)) + ".png")
             else:
-                sampler.progressive_sampling_and_save(noisyImage, [str(os.path.join(modelConfig["sampled_dir"],  str(modelConfig['sampled_start_index'] + i * modelConfig["batch_size"] + j).zfill(6))) for j in range(modelConfig['batch_size'])], i)
+                # sampler.progressive_sampling_and_save(noisyImage, [str(os.path.join(modelConfig["sampled_dir"],  str(modelConfig['sampled_start_index'] + i * modelConfig["batch_size"] + j).zfill(6))) for j in range(modelConfig['batch_size'])], i)
+                sampler.progressive_sampling_and_save(noisyImage, modelConfig["sampled_dir"], [modelConfig['sampled_start_index'] + i * modelConfig["batch_size"] + j for j in range(modelConfig['batch_size'])], i)
 
 
 import torch.distributed as dist
@@ -329,7 +330,8 @@ def sampleSingleNodeMultiGPU(local_rank: int, world_size: int, model_config):
                     save_image(sampledImgs[j], os.path.join(
                         model_config["sampled_dir"],  str(model_config['sampled_start_index'] + local_rank *  model_config["batch_size"] * model_config['sample_number_of_batch'] + i * model_config["batch_size"] + j).zfill(6)) + ".png")
             else:
-                sampler.progressive_sampling_and_save(noisyImage, [str(os.path.join(model_config["sampled_dir"],  str(model_config['sampled_start_index'] + local_rank *  model_config["batch_size"] * model_config['sample_number_of_batch'] + i * model_config["batch_size"] + j).zfill(6))) for j in range(model_config['batch_size'])], i)
+                # sampler.progressive_sampling_and_save(noisyImage, [str(os.path.join(model_config["sampled_dir"],  str(model_config['sampled_start_index'] + local_rank *  model_config["batch_size"] * model_config['sample_number_of_batch'] + i * model_config["batch_size"] + j).zfill(6))) for j in range(model_config['batch_size'])], i)
+                sampler.progressive_sampling_and_save(noisyImage, model_config["sampled_dir"], [model_config['sampled_start_index'] + local_rank *  model_config["batch_size"] * model_config['sample_number_of_batch'] + i * model_config["batch_size"] + j for j in range(model_config['batch_size'])], i)
     
     cleanup()
     
